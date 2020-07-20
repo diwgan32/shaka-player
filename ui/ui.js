@@ -191,6 +191,7 @@ shaka.ui.Overlay = class {
         played: 'rgb(255, 255, 255)',
         adBreaks: 'rgb(255, 204, 0)',
       },
+      riskConfig: [],
       volumeBarColors: {
         base: 'rgba(255, 255, 255, 0.54)',
         level: 'rgb(255, 255, 255)',

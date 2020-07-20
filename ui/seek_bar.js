@@ -58,7 +58,15 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
       this.video.currentTime = this.getValue();
     });
 
-
+    /** @private {!Array.<!HTMLElement>} */
+    this.warningZones_ = [];
+    /** @private {!Array.<!HTMLElement>} */
+    this.warningInfos_ = [];
+    /** @private {!Array.<number>} */
+    this.warningZonePos_ = [];
+    /** @private {!Array.<boolean>} */
+    this.isHovering_ = [];
+    this.initializeWarningZones_();
     /**
      * The timer is activated for live content and checks if
      * new ad breaks need to be marked in the current seek range.
@@ -104,11 +112,146 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
           this.adCuePoints_ = [];
           this.onAdCuePointsChanged_();
         });
-
     // Initialize seek state and label.
     this.setValue(this.video.currentTime);
     this.update();
     this.updateAriaLabel_();
+  }
+
+  /**
+   * @private
+   */
+  createWarningZone_(color) {
+    const zone = shaka.util.Dom.createHTMLElement('div');
+    zone.style.width = '30px';
+    zone.style.height = '4px';
+    zone.style.backgroundColor = color;
+    zone.style.position = 'absolute';
+    this.container.insertBefore(zone,
+        this.container.childNodes[0]);
+    return zone;
+  }
+
+  /**
+   * @private
+   */
+  createWarningInfo_(time, text, value) {
+    const info = shaka.util.Dom.createHTMLElement('div');
+    info.style.width = '80px';
+    info.style.height = '20px';
+    info.style.backgroundColor = 'rgba(209, 209, 209, .9)';
+    info.style.borderRadius = '5px';
+    info.style.position = 'absolute';
+    info.style.visibility = 'hidden';
+    info.style.top = '-30px';
+    info.style.textAlign = 'center';
+
+    const textElement = shaka.util.Dom.createHTMLElement('b');
+    textElement.textContent = text + ': ' + String(value);
+    info.insertBefore(textElement, info.childNodes[0]);
+    this.container.insertBefore(info,
+        this.container.childNodes[0]);
+    return info;
+  }
+
+  /**
+   * @private
+   */
+  initializeSingleWarningZone_(time, value, text, color) {
+    this.warningZones_.push(this.createWarningZone_(color));
+    this.warningInfos_.push(
+        this.createWarningInfo_(
+            time, text, value
+        )
+    );
+    this.isHovering_.push(false);
+    this.warningZonePos_.push(0);
+  }
+
+  /**
+   * @private
+   */
+  isHoveringOver_(event, pos) {
+    return event.offsetX > pos && event.offsetX < 35 + pos;
+  }
+
+  /**
+   * @private
+   */
+  onZoneHover_(zone, info) {
+    zone.style.height = '8px';
+    zone.style.width = '40px';
+    zone.style.top = '-2px';
+    info.style.visibility = 'visible';
+  }
+
+  /**
+   * @private
+   */
+  zoneReset_(zone, info) {
+    zone.style.height = '4px';
+    zone.style.width = '30px';
+    zone.style.top = '0px';
+    info.style.visibility = 'hidden';
+  }
+
+  /**
+   * @private
+   */
+  initializeWarningZones_() {
+    for (const zone of this.config_.riskConfig) {
+      const riskTime = zone.riskTime;
+      const riskColor = zone.riskColor;
+      const riskText = zone.riskText;
+      const riskValue = zone.riskValue;
+      this.initializeSingleWarningZone_(riskTime, riskValue,
+          riskText, riskColor);
+    }
+
+    this.eventManager.listen(this.bar, 'mousemove', (e) => {
+      for (let i = 0; i < this.warningZones_.length; i++) {
+        const zone = this.warningZones_[i];
+        const zonePos = this.warningZonePos_[i];
+        const info = this.warningInfos_[i];
+        if (this.isHoveringOver_(e, zonePos)) {
+          this.isHovering_[i] = true;
+          this.onZoneHover_(zone, info);
+        } else {
+          this.isHovering_[i] = false;
+          this.zoneReset_(zone, info);
+        }
+      }
+    });
+
+    this.eventManager.listen(this.bar, 'mouseout', () => {
+      for (let i = 0; i < this.warningZones_.length; i++) {
+        const zone = this.warningZones_[i];
+        const info = this.warningInfos_[i];
+        this.zoneReset_(zone, info);
+        this.isHovering_[i] = false;
+      }
+    });
+  }
+
+  /**
+   * @private
+   */
+  updateWarningZones_() {
+    for (let i = 0; i < this.config_.riskConfig.length; i++) {
+      const riskTime = this.config_.riskConfig[i].riskTime;
+      this.warningZonePos_[i] =
+          (riskTime/this.video.duration - 0.05) * this.bar.offsetWidth || 0;
+      if (this.isHovering_[i]) {
+        this.warningZonePos_[i] -= 5;
+      }
+      const labelPos = Math.max(
+          Math.min(this.warningZonePos_[i] - 22, this.bar.offsetWidth - 35), 2
+      );
+      this.warningInfos_[i].style.left =
+          String(labelPos)+'px';
+      this.warningZones_[i].style.left =
+          String(this.warningZonePos_[i])+'px';
+    }
   }
 
   /** @override */
@@ -197,7 +340,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     const seekRangeSize = seekRange.end - seekRange.start;
 
     this.setRange(seekRange.start, seekRange.end);
-
+    this.updateWarningZones_();
     if (!this.shouldBeDisplayed_()) {
       shaka.ui.Utils.setDisplay(this.container, false);
     } else {

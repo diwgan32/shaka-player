@@ -42,6 +42,25 @@ shaka.extern.UISeekBarColors;
 
 /**
  * @typedef {{
+ *   riskTime: number,
+ *   riskValue: number,
+ *   riskText: string,
+ *   riskColor: string
+ * }}
+ *
+ * @property {number} riskTime
+ *   The highest risk time to display on the seek bar
+ * @property {number} riskValue
+ *   The risk rating at the high risk time.
+ * @property {number} riskText
+ *   Text to display in info bubble
+ * @property {number} riskColor
+ *   Color of bar to display
+ */
+shaka.extern.UIRiskConfig;
+
+/**
+ * @typedef {{
  *   base: string,
  *   level: string
  * }}
@@ -65,6 +84,7 @@ shaka.extern.UIVolumeBarColors;
  *   clearBufferOnQualityChange: boolean,
  *   showUnbufferedStart: boolean,
  *   seekBarColors: shaka.extern.UISeekBarColors,
+ *   riskConfig: !Array.<shaka.extern.UIRiskConfig>,
  *   volumeBarColors: shaka.extern.UIVolumeBarColors,
  *   trackLabelFormat: shaka.ui.TrackLabelFormat,
  *   fadeDelay: number,
@@ -108,6 +128,8 @@ shaka.extern.UIVolumeBarColors;
  *   The CSS colors applied to the seek bar.  This allows you to override the
  *   colors used in the linear gradient constructed in JavaScript, since you
  *   cannot easily do this in pure CSS.
+ * @property {shaka.extern.UIRiskConfig} riskConfig
+ *   Configures the risk overlay that appears on the seek bar.
  * @property {shaka.extern.UIVolumeBarColors} volumeBarColors
  *   The CSS colors applied to the volume bar.  This allows you to override the
  *   colors used in the linear gradient constructed in JavaScript, since you
@@ -142,7 +164,6 @@ shaka.extern.UIVolumeBarColors;
  *   Defaults to true.
  */
 shaka.extern.UIConfiguration;
-
 
 /**
  * Interface for UI elements.  UI elements should inherit from the concrete base
