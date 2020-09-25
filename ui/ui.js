@@ -136,6 +136,23 @@ shaka.ui.Overlay = class {
     this.controls_.dispatchEvent(new shaka.util.FakeEvent('uiupdated'));
   }
 
+  /**
+   * @param {!Object} config This should either be a field name or an
+   *   object following the form of {@link shaka.extern.UIConfiguration}, where
+   *   you may omit any field you do not wish to change.
+   * @export
+   */
+  configureSeekBar(config) {
+    goog.asserts.assert(typeof(config) == 'object', 'Should be an object!');
+
+    shaka.util.ConfigUtils.mergeConfigObjects(
+        this.config_, config, this.defaultConfig_(),
+        /* overrides= */ {}, /* path= */ '');
+
+    goog.asserts.assert(this.player_ != null, 'Should have a player!');
+
+    this.controls_.configureSeekBarOnly(this.config_);
+  }
 
   /**
    * @return {shaka.ui.Controls}
@@ -191,7 +208,7 @@ shaka.ui.Overlay = class {
         played: 'rgb(255, 255, 255)',
         adBreaks: 'rgb(255, 204, 0)',
       },
-      riskConfig: [],
+      markerConfig: [],
       volumeBarColors: {
         base: 'rgba(255, 255, 255, 0.54)',
         level: 'rgb(255, 255, 255)',

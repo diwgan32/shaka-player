@@ -3784,6 +3784,12 @@ shaka.ui.Overlay = class {
    */
   configure(config, value) {}
   /**
+   * @param {!Object} config This should either be a field name or an
+   *   object following the form of {@link shaka.extern.UIConfiguration}, where
+   *   you may omit any field you do not wish to change.
+   */
+  configureSeekBar(config) {}
+  /**
    * @return {shaka.ui.Controls}
    */
   getControls() {}

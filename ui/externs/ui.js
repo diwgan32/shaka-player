@@ -42,22 +42,22 @@ shaka.extern.UISeekBarColors;
 
 /**
  * @typedef {{
- *   riskTime: number,
- *   riskValue: number,
- *   riskText: string,
- *   riskColor: string
+ *   time: number,
+ *   width: string,
+ *   text: string,
+ *   color: string
  * }}
  *
- * @property {number} riskTime
- *   The highest risk time to display on the seek bar
- * @property {number} riskValue
- *   The risk rating at the high risk time.
+ * @property {number} time
+ *   Time of marker
+ * @property {string} width
+ *   Width of marker
  * @property {number} riskText
- *   Text to display in info bubble
+ *   Text to display in marker
  * @property {number} riskColor
- *   Color of bar to display
+ *   Color of marker
  */
-shaka.extern.UIRiskConfig;
+shaka.extern.UIMarkerConfig;
 
 /**
  * @typedef {{
@@ -84,7 +84,7 @@ shaka.extern.UIVolumeBarColors;
  *   clearBufferOnQualityChange: boolean,
  *   showUnbufferedStart: boolean,
  *   seekBarColors: shaka.extern.UISeekBarColors,
- *   riskConfig: !Array.<shaka.extern.UIRiskConfig>,
+ *   markerConfig: !Array.<shaka.extern.UIMarkerConfig>,
  *   volumeBarColors: shaka.extern.UIVolumeBarColors,
  *   trackLabelFormat: shaka.ui.TrackLabelFormat,
  *   fadeDelay: number,
@@ -128,7 +128,7 @@ shaka.extern.UIVolumeBarColors;
  *   The CSS colors applied to the seek bar.  This allows you to override the
  *   colors used in the linear gradient constructed in JavaScript, since you
  *   cannot easily do this in pure CSS.
- * @property {shaka.extern.UIRiskConfig} riskConfig
+ * @property {shaka.extern.UIMarkerConfig} markerConfig
  *   Configures the risk overlay that appears on the seek bar.
  * @property {shaka.extern.UIVolumeBarColors} volumeBarColors
  *   The CSS colors applied to the volume bar.  This allows you to override the

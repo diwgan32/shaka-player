@@ -66,7 +66,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     this.warningZonePos_ = [];
     /** @private {!Array.<boolean>} */
     this.isHovering_ = [];
-    this.initializeWarningZones_();
+    this.initializeWarningZones();
     /**
      * The timer is activated for live content and checks if
      * new ad breaks need to be marked in the current seek range.
@@ -121,9 +121,9 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   /**
    * @private
    */
-  createWarningZone_(color) {
+  createWarningZone_(color, width) {
     const zone = shaka.util.Dom.createHTMLElement('div');
-    zone.style.width = '30px';
+    zone.style.width = width;
     zone.style.height = '4px';
     zone.style.backgroundColor = color;
     zone.style.position = 'absolute';
@@ -135,7 +135,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   /**
    * @private
    */
-  createWarningInfo_(time, text, value) {
+  createWarningInfo_(time, text) {
     const info = shaka.util.Dom.createHTMLElement('div');
     info.style.width = '80px';
     info.style.height = '20px';
@@ -147,7 +147,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     info.style.textAlign = 'center';
 
     const textElement = shaka.util.Dom.createHTMLElement('b');
-    textElement.textContent = text + ': ' + String(value);
+    textElement.textContent = text;
     info.insertBefore(textElement, info.childNodes[0]);
     this.container.insertBefore(info,
         this.container.childNodes[0]);
@@ -157,11 +157,11 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   /**
    * @private
    */
-  initializeSingleWarningZone_(time, value, text, color) {
-    this.warningZones_.push(this.createWarningZone_(color));
+  initializeSingleWarningZone_(time, width, text, color) {
+    this.warningZones_.push(this.createWarningZone_(color, width));
     this.warningInfos_.push(
         this.createWarningInfo_(
-            time, text, value
+            time, text
         )
     );
     this.isHovering_.push(false);
@@ -178,9 +178,9 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   /**
    * @private
    */
-  onZoneHover_(zone, info) {
+  onZoneHover_(zone, info, newWidth) {
     zone.style.height = '8px';
-    zone.style.width = '40px';
+    zone.style.width = newWidth;
     zone.style.top = '-2px';
     info.style.visibility = 'visible';
   }
@@ -188,24 +188,21 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   /**
    * @private
    */
-  zoneReset_(zone, info) {
+  zoneReset_(zone, info, newWidth) {
     zone.style.height = '4px';
-    zone.style.width = '30px';
+    zone.style.width = newWidth;
     zone.style.top = '0px';
     info.style.visibility = 'hidden';
   }
 
-  /**
-   * @private
-   */
-  initializeWarningZones_() {
-    for (const zone of this.config_.riskConfig) {
-      const riskTime = zone.riskTime;
-      const riskColor = zone.riskColor;
-      const riskText = zone.riskText;
-      const riskValue = zone.riskValue;
-      this.initializeSingleWarningZone_(riskTime, riskValue,
-          riskText, riskColor);
+  initializeWarningZones() {
+    for (const zone of this.config_.markerConfig) {
+      const time = zone.time;
+      const color = zone.color;
+      const text = zone.text;
+      const width = zone.width;
+      this.initializeSingleWarningZone_(time, width,
+          text, color);
     }
 
     this.eventManager.listen(this.bar, 'mousemove', (e) => {
@@ -213,12 +210,17 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
         const zone = this.warningZones_[i];
         const zonePos = this.warningZonePos_[i];
         const info = this.warningInfos_[i];
+        const width = parseInt(
+            this.config_.markerConfig[i].width.split('px')[0], 10
+        );
         if (this.isHoveringOver_(e, zonePos)) {
           this.isHovering_[i] = true;
-          this.onZoneHover_(zone, info);
+          this.onZoneHover_(zone, info,
+              String(Math.round(width * 1.2)) + 'px');
         } else {
           this.isHovering_[i] = false;
-          this.zoneReset_(zone, info);
+          this.zoneReset_(zone, info,
+              String(width) + 'px');
         }
       }
     });
@@ -227,25 +229,31 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
       for (let i = 0; i < this.warningZones_.length; i++) {
         const zone = this.warningZones_[i];
         const info = this.warningInfos_[i];
-        this.zoneReset_(zone, info);
+        const width = parseInt(
+            this.config_.markerConfig[i].width.split('px')[0], 10
+        );
+        this.zoneReset_(zone, info, String(width) + 'px');
         this.isHovering_[i] = false;
       }
     });
   }
 
-  /**
-   * @private
-   */
-  updateWarningZones_() {
-    for (let i = 0; i < this.config_.riskConfig.length; i++) {
-      const riskTime = this.config_.riskConfig[i].riskTime;
+  updateWarningZones() {
+    for (let i = 0; i < this.config_.markerConfig.length; i++) {
+      const time = this.config_.markerConfig[i].time;
+      const width = parseInt(
+          this.config_.markerConfig[i].width.split('px')[0], 10
+      );
       this.warningZonePos_[i] =
-          (riskTime/this.video.duration - 0.05) * this.bar.offsetWidth || 0;
+          (time/this.video.duration) * this.bar.offsetWidth - width/2 || 0;
       if (this.isHovering_[i]) {
-        this.warningZonePos_[i] -= 5;
+        this.warningZonePos_[i] -= .2 * width;
       }
       const labelPos = Math.max(
-          Math.min(this.warningZonePos_[i] - 22, this.bar.offsetWidth - 35), 2
+          Math.min(
+              this.warningZonePos_[i] - 22,
+              this.bar.offsetWidth - width
+          ), 2
       );
       this.warningInfos_[i].style.left =
           String(labelPos)+'px';
@@ -340,7 +348,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     const seekRangeSize = seekRange.end - seekRange.start;
 
     this.setRange(seekRange.start, seekRange.end);
-    this.updateWarningZones_();
+    this.updateWarningZones();
     if (!this.shouldBeDisplayed_()) {
       shaka.ui.Utils.setDisplay(this.container, false);
     } else {
