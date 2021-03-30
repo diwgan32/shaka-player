@@ -14,7 +14,6 @@ goog.require('shaka.ui.RangeElement');
 goog.require('shaka.ui.Utils');
 goog.require('shaka.util.Timer');
 
-
 /**
  * @extends {shaka.ui.RangeElement}
  * @final
@@ -137,7 +136,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
    */
   createWarningInfo_(time, text) {
     const info = shaka.util.Dom.createHTMLElement('div');
-    info.style.width = '80px';
+    info.style.width = shaka.ui.Constants.INFO_BAR_WIDTH+'px';
     info.style.height = '20px';
     info.style.backgroundColor = 'rgba(209, 209, 209, .9)';
     info.style.borderRadius = '5px';
@@ -171,8 +170,8 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
   /**
    * @private
    */
-  isHoveringOver_(event, pos) {
-    return event.offsetX > pos && event.offsetX < 35 + pos;
+  isHoveringOver_(event, pos, width) {
+    return event.offsetX > pos && event.offsetX < width + pos;
   }
 
   /**
@@ -213,7 +212,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
         const width = parseInt(
             this.config_.markerConfig[i].width.split('px')[0], 10
         );
-        if (this.isHoveringOver_(e, zonePos)) {
+        if (this.isHoveringOver_(e, zonePos, width)) {
           this.isHovering_[i] = true;
           this.onZoneHover_(zone, info,
               String(Math.round(width * 1.2)) + 'px');
@@ -247,11 +246,12 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
       this.warningZonePos_[i] =
           (time/this.video.duration) * this.bar.offsetWidth - width/2 || 0;
       if (this.isHovering_[i]) {
-        this.warningZonePos_[i] -= .2 * width;
+        this.warningZonePos_[i] -= 0.2 * width;
       }
       const labelPos = Math.max(
           Math.min(
-              this.warningZonePos_[i] - 22,
+              this.warningZonePos_[i]
+                - (shaka.ui.Constants.INFO_BAR_WIDTH/2 - width/2),
               this.bar.offsetWidth - width
           ), 2
       );
