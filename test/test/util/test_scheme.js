@@ -6,6 +6,21 @@
 
 goog.provide('shaka.test.TestScheme');
 
+goog.require('goog.asserts');
+goog.require('goog.Uri');
+goog.require('shaka.Player');
+goog.require('shaka.media.ManifestParser');
+goog.require('shaka.net.NetworkingEngine');
+goog.require('shaka.test.ManifestGenerator');
+goog.require('shaka.test.Mp4VodStreamGenerator');
+goog.require('shaka.test.TSVodStreamGenerator');
+goog.require('shaka.test.Util');
+goog.require('shaka.util.AbortableOperation');
+goog.require('shaka.util.Error');
+goog.require('shaka.util.ManifestParserUtils');
+goog.requireType('shaka.net.NetworkingEngine.RequestType');
+goog.requireType('shaka.test.IStreamGenerator');
+
 
 /**
  * @typedef {{
@@ -198,6 +213,7 @@ shaka.test.TestScheme = class {
       stream.useSegmentTemplate(
           'test:' + name + '/' + contentType + '/%d',
           data[contentType].segmentDuration);
+      stream.segmentIndex.markImmutable();
       stream.closedCaptions = data[contentType].closedCaptions;
 
       if (data[contentType].delaySetup) {
@@ -205,10 +221,26 @@ shaka.test.TestScheme = class {
       }
 
       if (data.licenseServers) {
-        for (const keySystem in data.licenseServers) {
+        // Real content typically doesn't contain license server URLs, but if it
+        // does, we use them in preference over everything else.  There is a
+        // config to override that for DASH, but this test utility isn't DASH
+        // and that player config wouldn't do any good for a test case.
+        //
+        // So, we don't put the specific license servers into the manifest
+        // structure.  That should always be done in the player config instead,
+        // and we have the static setupPlayer() method above to do that in
+        // tests.
+        //
+        // Instead, we place generic DrmInfo for all common key systems here,
+        // and tests can use any of them by configuring a license server.
+        const commonKeySystems = [
+          'com.apple.fps.1_0',
+          'com.microsoft.playready',
+          'com.widevine.alpha',
+        ];
+        for (const keySystem of commonKeySystems) {
           stream.encrypted = true;
           stream.addDrmInfo(keySystem, (drmInfo) => {
-            drmInfo.licenseServerUri = data.licenseServers[keySystem];
             if (data[contentType].initData) {
               drmInfo.addCencInitData(data[contentType].initData);
             }
@@ -519,7 +551,7 @@ shaka.test.TestScheme.DATA = {
     ],
     audioLanguages: ['en', 'es'],
     textLanguages: ['zh', 'fr'],
-    duration: 10,
+    duration: 30,
   },
 
   'sintel_audio_only': {
@@ -575,6 +607,7 @@ shaka.test.TestScheme.DATA = {
       segmentUri: '/base/test/test/assets/captions-test.ts',
       mimeType: 'video/mp2t',
       codecs: 'avc1.64001e',
+      segmentDuration: 2,
     },
     text: {
       mimeType: 'application/cea-608',
@@ -602,11 +635,49 @@ beforeAll(async () => {
   await shaka.test.TestScheme.createManifests(shaka, '');
 });
 
+/**
+ * Because our MediaCapabilities integration adds decoding info to each variant,
+ * we need to be careful to reset this info on variants that are cached and
+ * persist between tests and between manifest parser instances.  This ensures
+ * that these unusual test variants will not have persistent decoding infos from
+ * MediaCapabilities.
+ *
+ * For encrypted content, the decoding info contains negotiated EME information
+ * which varies based on the chosen key system and whether the content will be
+ * streamed or stored offline.  If one test loads the content for streaming,
+ * then another test loads the same content for offline storage, the second test
+ * would encounter the cached decoding info from the first test, and the
+ * negotatied key system would not be set up for the correct session types.
+ * This would lead to a test failure.  This sort of failure would not be seen in
+ * real playback (since no supported manifest parser would ever cache variants).
+ *
+ * By resetting variant.decodingInfos when the fake manifest parser is stopped,
+ * we ensure that each test gets a clean slate (as would happen with a real
+ * parser), and the correct decodingInfos show up for each part of each test
+ * case.
+ *
+ * @param {?shaka.extern.Manifest} manifest
+ */
+function resetDecodingInfos(manifest) {
+  if (!manifest) {
+    return;
+  }
+
+  for (const variant of manifest.variants) {
+    variant.decodingInfos = [];
+  }
+}
+
 
 /**
  * @implements {shaka.extern.ManifestParser}
  */
 shaka.test.TestScheme.ManifestParser = class {
+  constructor() {
+    /** @private {?shaka.extern.Manifest} */
+    this.manifest_ = null;
+  }
+
   /** @override */
   configure(config) {}
 
@@ -630,18 +701,17 @@ shaka.test.TestScheme.ManifestParser = class {
     if (!manifest) {
       throw new Error('Unknown manifest!');
     }
+    this.manifest_ = manifest;
 
-    // Invoke filtering interfaces similar to how a real parser would.
-    // This makes sure the filtering functions are covered implicitly by
-    // tests. This covers regression
-    // https://github.com/google/shaka-player/issues/988
-    playerInterface.filter(manifest);
+    playerInterface.makeTextStreamsForClosedCaptions(manifest);
 
     return Promise.resolve(manifest);
   }
 
   /** @override */
   stop() {
+    resetDecodingInfos(this.manifest_);
+    this.manifest_ = null;
     return Promise.resolve();
   }
 

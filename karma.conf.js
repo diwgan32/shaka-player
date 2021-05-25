@@ -70,6 +70,7 @@ module.exports = (config) => {
 
     plugins: [
       'karma-*',  // default plugins
+      '@*/karma-*', // default scoped plugins
 
       // An inline plugin which supplies the webdriver-screenshot middleware.
       {
@@ -86,6 +87,10 @@ module.exports = (config) => {
       'node_modules/es6-promise-polyfill/promise.js',
       //   Babel polyfill, required for async/await
       'node_modules/babel-polyfill/dist/polyfill.js',
+      //   TextDecoder polyfill, required for TextDecoder/TextEncoder on IE and
+      //   legacy Edge
+      //   eslint-disable-next-line max-len
+      'node_modules/fastestsmallesttextencoderdecoder/EncoderDecoderTogether.min.js',
 
       // muxjs module next
       'node_modules/mux.js/dist/mux.min.js',
@@ -179,7 +184,7 @@ module.exports = (config) => {
         uncompiled: !!settings.uncompiled,
 
         // Limit which tests to run. If undefined, all tests should run.
-        specFilter: settings.filter,
+        filter: settings.filter,
 
         // Set what level of logs for the player to print.
         logLevel: SHAKA_LOG_MAP[settings.logging],
@@ -378,7 +383,7 @@ function allUsableBrowserLaunchers(config) {
       // Most launchers requiring configuration through customLaunchers have
       // no DEFAULT_CMD.  Some launchers have DEFAULT_CMD, but not for this
       // platform.  Finally, WebDriver has DEFAULT_CMD, but still requires
-      // configuration, so we simply blacklist it by name.
+      // configuration, so we simply reject it by name.
       // eslint-disable-next-line no-restricted-syntax
       const DEFAULT_CMD = pluginConstructor.prototype.DEFAULT_CMD;
       if (!DEFAULT_CMD || !DEFAULT_CMD[process.platform]) {
@@ -433,6 +438,10 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
    * @return {!Object.<string, string>}
    */
   function getParams(request) {
+    // This can be null for manually-connected browsers.
+    if (!request._parsedUrl.search) {
+      return {};
+    }
     return util.parseQueryParams(request._parsedUrl.search);
   }
 
@@ -443,10 +452,14 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
    *
    * If the browser is not found, this function will return null.
    *
-   * @param {string} id
+   * @param {?string} id
    * @return {karma.Launcher.Browser|null}
    */
   function getBrowser(id) {
+    if (!id) {
+      // No ID parameter?  No such browser.
+      return null;
+    }
     const browser = launcher._browsers.find((b) => b.id == id);
     if (!browser) {
       return null;
@@ -455,11 +468,17 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
   }
 
   /**
-   * @param {karma.Launcher.Browser} browser
+   * @param {?karma.Launcher.Browser} browser
    * @return {wd.remote|null} A WebDriver client, an object from the "wd"
    *   package, created by "wd.remote()".
    */
   function getWebDriverClient(browser) {
+    if (!browser) {
+      // If we didn't launch the browser, then there's definitely no WebDriver
+      // client for it.
+      return null;
+    }
+
     // If this browser was launched by the WebDriver launcher, the launcher's
     // browser object has a WebDriver client in the "browser" field.  Yes, this
     // looks weird.
@@ -550,12 +569,26 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
     const spec = browser.spec;
     // Compute the folder for the screenshots for this platform.
     const baseFolder = `${__dirname}/test/test/assets/screenshots`;
-    const folder = `${baseFolder}/${spec.browserName}-${spec.platform}`;
+    let folder = `${baseFolder}/${spec.browserName}`;
+    if (spec.platform) {
+      folder += `-${spec.platform}`;
+    }
 
     const oldScreenshotPath = `${folder}/${params.name}.png`;
     const fullScreenshotPath = `${folder}/${params.name}.png-full`;
     const newScreenshotPath = `${folder}/${params.name}.png-new`;
     const diffScreenshotPath = `${folder}/${params.name}.png-diff`;
+
+    // Write the full screenshot to disk.  This should be done early in case a
+    // later stage fails and we need to analyze what happened.
+    fs.mkdirSync(folder, {recursive: true});
+    fs.writeFileSync(
+        fullScreenshotPath, await fullScreenshot.getBufferAsync('image/png'));
+
+    // Write the cropped screenshot to disk next.  This is used in review
+    // changes and to update the "official" screenshot when needed.
+    fs.writeFileSync(
+        newScreenshotPath, await newScreenshot.getBufferAsync('image/png'));
 
     /** @type {!Jimp.image} */
     let oldScreenshot;
@@ -569,16 +602,14 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
 
     // Compare the new screenshot to the old one and produce a diff image.
     // Initially, the image data will be raw pixels, 4 bytes per pixel.
-    const diff = Jimp.diff(oldScreenshot, newScreenshot, /* threshold= */ 0);
+    // The threshold parameter affects the sensitivity of individual pixel
+    // comparisons.  Setting it too low means small rendering changes in the
+    // browser can cause failures even when a human can't see the difference,
+    // and setting it too high means human-noticeable changes could go
+    // undetected by a test.
+    const diff = Jimp.diff(oldScreenshot, newScreenshot, /* threshold= */ 0.07);
 
-    // Write the screenshot and diff to disk.  This makes it easy to review
-    // the diff on failure or update the "official" screenshot easily when
-    // needed.
-    fs.mkdirSync(folder, {recursive: true});
-    fs.writeFileSync(
-        fullScreenshotPath, await fullScreenshot.getBufferAsync('image/png'));
-    fs.writeFileSync(
-        newScreenshotPath, await newScreenshot.getBufferAsync('image/png'));
+    // Write the diff to disk.  This is used to review when there are changes.
     fs.writeFileSync(
         diffScreenshotPath, await diff.image.getBufferAsync('image/png'));
 
@@ -605,15 +636,9 @@ function WebDriverScreenshotMiddlewareFactory(launcher) {
     if (pathname == '/screenshot/isSupported') {
       const params = getParams(request);
       const browser = getBrowser(params.id);
-      if (!browser) {
-        response.writeHead(404);
-        response.end('No such browser!');
-        return;
-      }
-
-      let isSupported = false;
       const webDriverClient = getWebDriverClient(browser);
 
+      let isSupported = false;
       if (webDriverClient) {
         // Some platforms in our Selenium grid can't take screenshots.  We don't
         // have a good way to check for this in the platform capabilities

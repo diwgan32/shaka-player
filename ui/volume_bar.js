@@ -8,7 +8,9 @@
 goog.provide('shaka.ui.VolumeBar');
 
 goog.require('goog.asserts');
+goog.require('shaka.ads.AdManager');
 goog.require('shaka.ui.Constants');
+goog.require('shaka.ui.Controls');
 goog.require('shaka.ui.Locales');
 goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.RangeElement');
@@ -58,6 +60,11 @@ shaka.ui.VolumeBar = class extends shaka.ui.RangeElement {
     // Initialize volume display and label.
     this.onPresentationVolumeChange_();
     this.updateAriaLabel_();
+
+    if (this.ad) {
+      // There was already an ad.
+      this.onChange();
+    }
   }
 
   /**

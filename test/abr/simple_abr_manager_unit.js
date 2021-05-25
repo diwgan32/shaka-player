@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+goog.require('shaka.abr.SimpleAbrManager');
+goog.require('shaka.test.ManifestGenerator');
+goog.require('shaka.test.Util');
+goog.require('shaka.util.PlayerConfiguration');
+
 describe('SimpleAbrManager', () => {
   const sufficientBWMultiplier = 1.06;
   const defaultBandwidthEstimate = 500e3; // 500kbps
@@ -62,6 +67,7 @@ describe('SimpleAbrManager', () => {
 
     config = shaka.util.PlayerConfiguration.createDefault().abr;
     config.defaultBandwidthEstimate = defaultBandwidthEstimate;
+    config.useNetworkInformation = false;
 
     variants = manifest.variants;
 
@@ -83,7 +89,6 @@ describe('SimpleAbrManager', () => {
 
   it('uses custom default estimate', () => {
     config.defaultBandwidthEstimate = 3e6;
-    config.useNetworkInformation = false;
     abrManager.configure(config);
     const chosen = abrManager.chooseVariant();
     expect(chosen.id).toBe(104);

@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+goog.require('shaka.test.UiUtils');
+goog.require('shaka.test.Util');
+goog.require('shaka.text.Cue');
+goog.require('shaka.text.UITextDisplayer');
+
 describe('UITextDisplayer', () => {
   /** @type {!HTMLElement} */
   let videoContainer;
@@ -85,27 +90,36 @@ describe('UITextDisplayer', () => {
         videoContainer.querySelector('.shaka-text-container');
     const captions = textContainer.querySelector('span');
     const cssObj = parseCssText(captions.style.cssText);
-    expect(cssObj).toEqual(
-        jasmine.objectContaining({
-          'color': 'green',
-          'background-color': 'black',
-          'direction': 'ltr',
-          'font-size': '10px',
-          'font-style': 'normal',
-          'font-weight': 400,
-          'line-height': 2,
-          'text-align': 'center',
-          // TODO: We're not testing writing-mode since IE 11 only supports
-          // deprecated writing-mode values partially. Add it back once we end
-          // support for IE 11.
-          // https://github.com/google/shaka-player/issues/2339
-          // 'writing-mode': 'horizontal-tb',
-        }));
+
+    const expectCssObj = {
+      'color': 'green',
+      'background-color': 'black',
+      'direction': 'ltr',
+      'font-size': '10px',
+      'font-style': 'normal',
+      'font-weight': 400,
+      'line-height': 2,
+      'text-align': 'center',
+    };
+
+    // Either the prefixed or unprefixed version may be present.  We will accept
+    // either.  Detecting which property the platform has may not work, because
+    // Tizen 3, for example, has a writingMode property, but it is
+    // non-functional.  Instead of checking for which properties are on the
+    // platform's style interface, check which properties are in the cssObj.
+    // We expect one or the other to work on all supported platforms.
+    if ('writing-mode' in cssObj) {
+      expectCssObj['writing-mode'] = 'horizontal-tb';
+    } else {
+      expectCssObj['-webkit-writing-mode'] = 'horizontal-tb';
+    }
+
+    expect(cssObj).toEqual(jasmine.objectContaining(expectCssObj));
   });
 
   it('correctly displays styles for nested cues', async () => {
     /** @type {!shaka.text.Cue} */
-    const cue = new shaka.text.Cue(0, 100, 'Captain\'s log.');
+    const cue = new shaka.text.Cue(0, 100, '');
     const nestedCue = new shaka.text.Cue(0, 100, 'Captain\'s log.');
     cue.nestedCues = [nestedCue];
     nestedCue.textAlign = 'center';
@@ -128,20 +142,29 @@ describe('UITextDisplayer', () => {
         videoContainer.querySelector('.shaka-text-container');
     const captions = textContainer.querySelector('span');
     const cssObj = parseCssText(captions.style.cssText);
-    expect(cssObj).toEqual(
-        jasmine.objectContaining({
-          'color': 'green',
-          'background-color': 'black',
-          'font-size': '10px',
-          'font-style': 'normal',
-          'font-weight': 400,
-          'text-align': 'center',
-          // TODO: We're not testing writing-mode since IE 11 only supports
-          // deprecated writing-mode values partially. Add it back once we end
-          // support for IE 11.
-          // https://github.com/google/shaka-player/issues/2339
-          // 'writing-mode': 'horizontal-tb',
-        }));
+
+    const expectCssObj = {
+      'color': 'green',
+      'background-color': 'black',
+      'font-size': '10px',
+      'font-style': 'normal',
+      'font-weight': 400,
+      'text-align': 'center',
+    };
+
+    // Either the prefixed or unprefixed version may be present.  We will accept
+    // either.  Detecting which property the platform has may not work, because
+    // Tizen 3, for example, has a writingMode property, but it is
+    // non-functional.  Instead of checking for which properties are on the
+    // platform's style interface, check which properties are in the cssObj.
+    // We expect one or the other to work on all supported platforms.
+    if ('writing-mode' in cssObj) {
+      expectCssObj['writing-mode'] = 'horizontal-tb';
+    } else {
+      expectCssObj['-webkit-writing-mode'] = 'horizontal-tb';
+    }
+
+    expect(cssObj).toEqual(jasmine.objectContaining(expectCssObj));
   });
 
   it('correctly displays styles for cellResolution units', async () => {
@@ -207,23 +230,90 @@ describe('UITextDisplayer', () => {
   });
 
   it('does not display duplicate cues', async () => {
-    const cue = new shaka.text.Cue(0, 100, 'Captain\'s log.');
+    // These are identical.
+    const cue1 = new shaka.text.Cue(0, 100, 'Captain\'s log.');
+    const cue2 = new shaka.text.Cue(0, 100, 'Captain\'s log.');
+
     textDisplayer.setTextVisibility(true);
-    textDisplayer.append([cue]);
+    textDisplayer.append([cue1]);
     // Wait until updateCaptions_() gets called.
     await shaka.test.Util.delay(0.5);
     /** @type {Element} */
     const textContainer = videoContainer.querySelector('.shaka-text-container');
-    let captions = textContainer.querySelectorAll('span');
+    let captions = textContainer.querySelectorAll('div');
     // Expect textContainer to display this cue.
     expect(captions.length).toBe(1);
 
-    const cue2 = new shaka.text.Cue(0, 100, 'Captain\'s log.');
     textDisplayer.append([cue2]);
     // Wait until updateCaptions_() gets called.
     await shaka.test.Util.delay(0.5);
-    captions = textContainer.querySelectorAll('span');
+    captions = textContainer.querySelectorAll('div');
     // Expect textContainer to display one cue without duplication.
     expect(captions.length).toBe(1);
+  });
+
+  it('does not mistake cues with nested cues as duplicates', async () => {
+    // These are not identical, but might look like it at the top level.
+    const cue1 = new shaka.text.Cue(0, 100, '');
+    cue1.nestedCues = [
+      new shaka.text.Cue(0, 100, 'Nested cue 1.'),
+    ];
+    const cue2 = new shaka.text.Cue(0, 100, '');
+    cue2.nestedCues = [
+      new shaka.text.Cue(0, 100, 'Nested cue 2.'),
+    ];
+    const cue3 = new shaka.text.Cue(0, 100, '');
+    cue3.nestedCues = [
+      new shaka.text.Cue(0, 100, 'Nested cue 3.'),
+    ];
+
+    textDisplayer.setTextVisibility(true);
+    textDisplayer.append([cue1]);
+    // Wait until updateCaptions_() gets called.
+    await shaka.test.Util.delay(0.5);
+    /** @type {Element} */
+    const textContainer = videoContainer.querySelector('.shaka-text-container');
+    let captions = textContainer.querySelectorAll('div');
+    // Expect textContainer to display this cue.
+    expect(captions.length).toBe(1);
+
+    textDisplayer.append([cue2, cue3]);
+    // Wait until updateCaptions_() gets called.
+    await shaka.test.Util.delay(0.5);
+    captions = textContainer.querySelectorAll('div');
+    // Expect textContainer to display all three cues, since they are not truly
+    // duplicates.
+    expect(captions.length).toBe(3);
+  });
+
+  it('does not mistake cues with different styles duplicates', async () => {
+    // These all have the same text and timing, but different styles.
+    const cue1 = new shaka.text.Cue(0, 100, 'Hello!');
+    cue1.color = 'green';
+
+    const cue2 = new shaka.text.Cue(0, 100, 'Hello!');
+    cue2.color = 'green';
+    cue2.fontStyle = shaka.text.Cue.fontStyle.ITALIC;
+
+    const cue3 = new shaka.text.Cue(0, 100, 'Hello!');
+    cue3.color = 'blue';
+
+    textDisplayer.setTextVisibility(true);
+    textDisplayer.append([cue1]);
+    // Wait until updateCaptions_() gets called.
+    await shaka.test.Util.delay(0.5);
+    /** @type {Element} */
+    const textContainer = videoContainer.querySelector('.shaka-text-container');
+    let captions = textContainer.querySelectorAll('div');
+    // Expect textContainer to display this cue.
+    expect(captions.length).toBe(1);
+
+    textDisplayer.append([cue2, cue3]);
+    // Wait until updateCaptions_() gets called.
+    await shaka.test.Util.delay(0.5);
+    captions = textContainer.querySelectorAll('div');
+    // Expect textContainer to display all three cues, since they are not truly
+    // duplicates.
+    expect(captions.length).toBe(3);
   });
 });

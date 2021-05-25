@@ -199,9 +199,10 @@ const references = refs.map(function(r) {
 const index = new shaka.media.SegmentIndex(references);
 ```
 
-To merge updates, simply create a new array of segments and call `merge`.  Any
-existing segments will be updated and new segments will be added.  You can also
-call `evict` to remove old references to reduce the memory footprint.
+To merge updates and remove old references to reduce the memory footprint,
+simply create a new array of segments and call `mergeAndEvict`.  Any
+existing segments will be updated, new segments will be added, and old
+unavailable references will be removed.
 
 To expand the list of references on a timer, as is done for DASH's
 SegmentTemplate, call `index.updateEvery` with a callback that evicts old
@@ -219,6 +220,11 @@ index.updateEvery(updateIntervalSeconds, () => {
 });
 ```
 
+If the callback returns null, the update timer for this index will be stopped.
+(NOTE: This method was introduced in v3.0.0, but the interpretation of the
+callback's return changed in v3.0.8 to fix a bug in our DASH SegmentTemplate
+support.  We apologize for any inconvenience.)
+
 
 ## Manifest Updates
 
@@ -233,6 +239,9 @@ After adding new content, you should call the `filter` method on the player
 interface.  This removes any streams that were added that are incompatible with
 the platform.  Keep in mind that this is an asynchronous method, and thus you
 will need to use it in conjunction with `.then()` or `await`.
+You should also call the `makeTextStreamsForClosedCaptions` method on the
+player interface, which is required for embedded captions (for example, CEA
+608) to work; it makes dummy text streams to represent these tracks.
 
 
 ## Full Manifest Parser Example

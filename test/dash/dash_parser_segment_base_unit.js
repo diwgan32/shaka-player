@@ -4,6 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+goog.require('goog.asserts');
+goog.require('shaka.test.Dash');
+goog.require('shaka.test.FakeNetworkingEngine');
+goog.require('shaka.test.Util');
+goog.require('shaka.util.Error');
+goog.requireType('shaka.dash.DashParser');
+
 describe('DashParser SegmentBase', () => {
   const Dash = shaka.test.Dash;
 
@@ -29,9 +36,13 @@ describe('DashParser SegmentBase', () => {
     playerInterface = {
       networkingEngine: fakeNetEngine,
       filter: (manifest) => Promise.resolve(),
+      makeTextStreamsForClosedCaptions: (manifest) => {},
       onTimelineRegionAdded: fail,  // Should not have any EventStream elements.
       onEvent: fail,
       onError: fail,
+      isLowLatencyMode: () => false,
+      isAutoLowLatencyMode: () => false,
+      enableLowLatencyMode: () => {},
     };
   });
 
@@ -41,13 +52,13 @@ describe('DashParser SegmentBase', () => {
       '  <BaseURL>http://example.com</BaseURL>',
       '  <Period>',
       '    <AdaptationSet mimeType="video/webm">',
-      '      <Representation id="1" bandwidth="1">',
+      '      <Representation id="1" bandwidth="1" frameRate="3000/3001">',
       '        <BaseURL>media-1.webm</BaseURL>',
       '        <SegmentBase indexRange="100-200" timescale="9000">',
       '          <Initialization sourceURL="init-1.webm" range="201-300" />',
       '        </SegmentBase>',
       '      </Representation>',
-      '      <Representation id="2" bandwidth="1">',
+      '      <Representation id="2" bandwidth="1" frameRate="1500/1501">',
       '        <BaseURL>media-2.webm</BaseURL>',
       '        <SegmentBase indexRange="1100-1200" timescale="9000">',
       '          <Initialization sourceURL="init-2.webm" range="1201-1300" />',
@@ -293,6 +304,46 @@ describe('DashParser SegmentBase', () => {
     const reference = Array.from(video.segmentIndex)[0];
     expect(reference.startTime).toBe(-2);
     expect(reference.endTime).toBe(10);  // would be 12 without PTO
+  });
+
+  // https://github.com/google/shaka-player/issues/3230
+  it('works with multi-Period with eviction', async () => {
+    const source = [
+      '<MPD mediaPresentationDuration="PT75S">',
+      '  <Period duration="PT30S">',
+      '    <AdaptationSet mimeType="video/mp4">',
+      '      <Representation bandwidth="1">',
+      '        <BaseURL>http://example.com/index.mp4</BaseURL>',
+      '        <SegmentBase indexRange="30-900" />',
+      '      </Representation>',
+      '    </AdaptationSet>',
+      '  </Period>',
+      '  <Period>',
+      '    <AdaptationSet mimeType="video/mp4">',
+      '      <Representation bandwidth="1">',
+      '        <BaseURL>http://example.com/index.mp4</BaseURL>',
+      '        <SegmentBase indexRange="30-900" presentationTimeOffset="30" />',
+      '      </Representation>',
+      '    </AdaptationSet>',
+      '  </Period>',
+      '</MPD>',
+    ].join('\n');
+
+    fakeNetEngine
+        .setResponseText('dummy://foo', source)
+        .setResponseValue('http://example.com/index.mp4', indexSegment);
+
+    /** @type {shaka.extern.Manifest} */
+    const manifest = await parser.start('dummy://foo', playerInterface);
+    const video = manifest.variants[0].video;
+    await video.createSegmentIndex();  // real data, should succeed
+    goog.asserts.assert(video.segmentIndex != null, 'Null segmentIndex!');
+
+    // There are originally 5 references, but the segment that spans the Period
+    // boundary is duplicated.  In the bug, we'd stop references at the Period
+    // boundary and only have 3 references.
+    const references = Array.from(video.segmentIndex);
+    expect(references.length).toBe(6);
   });
 
   describe('fails for', () => {

@@ -7,11 +7,15 @@
 
 goog.provide('shaka.ui.PlaybackRateSelection');
 
+goog.require('shaka.ui.Constants');
 goog.require('shaka.ui.Enums');
 goog.require('shaka.ui.Locales');
 goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.OverflowMenu');
 goog.require('shaka.ui.SettingsMenu');
+goog.require('shaka.ui.Utils');
+goog.require('shaka.util.Dom');
+goog.requireType('shaka.ui.Controls');
 
 /**
  * @extends {shaka.ui.SettingsMenu}
@@ -120,6 +124,7 @@ shaka.ui.PlaybackRateSelection = class extends shaka.ui.SettingsMenu {
 
       this.eventManager.listen(button, 'click', () => {
         this.video.playbackRate = this.playbackRates_.get(rateStr);
+        this.video.defaultPlaybackRate = this.playbackRates_.get(rateStr);
       });
 
       this.menu.appendChild(button);

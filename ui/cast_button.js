@@ -7,12 +7,20 @@
 
 goog.provide('shaka.ui.CastButton');
 
+goog.require('shaka.cast.CastProxy');
+goog.require('shaka.ui.Constants');
+goog.require('shaka.ui.Controls');
 goog.require('shaka.ui.Element');
+goog.require('shaka.ui.Enums');
 goog.require('shaka.ui.Locales');
 goog.require('shaka.ui.Localization');
 goog.require('shaka.ui.OverflowMenu');
 goog.require('shaka.ui.Utils');
 goog.require('shaka.util.Dom');
+goog.require('shaka.util.Error');
+goog.require('shaka.util.FakeEvent');
+goog.requireType('shaka.cast.CastProxy');
+goog.requireType('shaka.ui.Controls');
 
 
 /**
@@ -44,6 +52,7 @@ shaka.ui.CastButton = class extends shaka.ui.Element {
 
     const label = shaka.util.Dom.createHTMLElement('label');
     label.classList.add('shaka-overflow-button-label');
+    label.classList.add('shaka-overflow-menu-only');
     this.castNameSpan_ = shaka.util.Dom.createHTMLElement('span');
     label.appendChild(this.castNameSpan_);
 
@@ -171,4 +180,7 @@ shaka.ui.CastButton.Factory = class {
 };
 
 shaka.ui.OverflowMenu.registerElement(
+    'cast', new shaka.ui.CastButton.Factory());
+
+shaka.ui.Controls.registerElement(
     'cast', new shaka.ui.CastButton.Factory());

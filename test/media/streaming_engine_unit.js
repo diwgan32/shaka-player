@@ -4,6 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+goog.require('goog.asserts');
+goog.require('shaka.log');
+goog.require('shaka.media.InitSegmentReference');
+goog.require('shaka.media.SegmentReference');
+goog.require('shaka.media.StreamingEngine');
+goog.require('shaka.net.NetworkingEngine');
+goog.require('shaka.net.NetworkingEngine.PendingRequest');
+goog.require('shaka.test.FakeNetworkingEngine');
+goog.require('shaka.test.FakeMediaSourceEngine');
+goog.require('shaka.test.ManifestGenerator');
+goog.require('shaka.test.StreamingEngineUtil');
+goog.require('shaka.test.Util');
+goog.require('shaka.util.AbortableOperation');
+goog.require('shaka.util.Error');
+goog.require('shaka.util.Iterables');
+goog.require('shaka.util.ManifestParserUtils');
+goog.require('shaka.util.MimeUtils');
+goog.require('shaka.util.PlayerConfiguration');
+goog.require('shaka.util.PublicPromise');
+goog.require('shaka.util.Uint8ArrayUtils');
+goog.requireType('shaka.media.PresentationTimeline');
+goog.requireType('shaka.test.FakeNetworkingEngine');
+goog.requireType('shaka.test.FakePresentationTimeline');
+
 describe('StreamingEngine', () => {
   const Util = shaka.test.Util;
   const ContentType = shaka.util.ManifestParserUtils.ContentType;
@@ -96,8 +120,10 @@ describe('StreamingEngine', () => {
     jasmine.clock().mockDate();
   });
 
-  /** @param {boolean=} trickMode */
-  function setupVod(trickMode) {
+  /** @param {boolean=} trickMode
+   * @param {number=} mediaOffset The offset from 0 for the segment start times
+   */
+  function setupVod(trickMode, mediaOffset) {
     // For VOD, we fake a presentation that has 2 Periods of equal duration
     // (20 seconds), where each Period has 1 Variant and 1 text stream.
     //
@@ -107,6 +133,11 @@ describe('StreamingEngine', () => {
     // There are 12 media segments: 2 audio, 2 video, and 2 text for the
     // first Period, and 2 audio, 2 video, and 2 text for the second Period.
     // All media segments are (by default) 10 seconds long.
+
+    const offset = mediaOffset || 0;
+    // timestampOffset is -ve since it is added to bring the timeline to 0.
+    // -0 and 0 are not same so explicitly set to 0.
+    const timestampOffset = offset === 0 ? 0 : -offset;
 
     // Create SegmentData map for FakeMediaSourceEngine.
     const initSegmentSizeAudio = initSegmentRanges[ContentType.AUDIO][1] -
@@ -118,7 +149,8 @@ describe('StreamingEngine', () => {
     segmentData = {
       audio: {
         initSegments: [
-          makeBuffer(initSegmentSizeAudio), makeBuffer(initSegmentSizeAudio),
+          makeBuffer(initSegmentSizeAudio),
+          makeBuffer(initSegmentSizeAudio),
         ],
         segments: [
           makeBuffer(segmentSizes[ContentType.AUDIO]),
@@ -126,12 +158,14 @@ describe('StreamingEngine', () => {
           makeBuffer(segmentSizes[ContentType.AUDIO]),
           makeBuffer(segmentSizes[ContentType.AUDIO]),
         ],
-        segmentStartTimes: [0, 10, 20, 30],
+        segmentStartTimes: [offset, offset+10, offset+20, offset+30],
         segmentDuration: 10,
+        timestampOffset: timestampOffset,
       },
       video: {
         initSegments: [
-          makeBuffer(initSegmentSizeVideo), makeBuffer(initSegmentSizeVideo),
+          makeBuffer(initSegmentSizeVideo),
+          makeBuffer(initSegmentSizeVideo),
         ],
         segments: [
           makeBuffer(segmentSizes[ContentType.VIDEO]),
@@ -139,8 +173,9 @@ describe('StreamingEngine', () => {
           makeBuffer(segmentSizes[ContentType.VIDEO]),
           makeBuffer(segmentSizes[ContentType.VIDEO]),
         ],
-        segmentStartTimes: [0, 10, 20, 30],
+        segmentStartTimes: [offset, offset+10, offset+20, offset+30],
         segmentDuration: 10,
+        timestampOffset: timestampOffset,
       },
       text: {
         initSegments: [],
@@ -150,14 +185,16 @@ describe('StreamingEngine', () => {
           makeBuffer(segmentSizes[ContentType.TEXT]),
           makeBuffer(segmentSizes[ContentType.TEXT]),
         ],
-        segmentStartTimes: [0, 10, 20, 30],
+        segmentStartTimes: [offset, offset+10, offset+20, offset+30],
         segmentDuration: 10,
+        timestampOffset: timestampOffset,
       },
     };
     if (trickMode) {
       segmentData.trickvideo = {
         initSegments: [
-          makeBuffer(initSegmentSizeVideo), makeBuffer(initSegmentSizeVideo),
+          makeBuffer(initSegmentSizeVideo),
+          makeBuffer(initSegmentSizeVideo),
         ],
         segments: [
           makeBuffer(segmentSizes[ContentType.VIDEO]),
@@ -165,8 +202,9 @@ describe('StreamingEngine', () => {
           makeBuffer(segmentSizes[ContentType.VIDEO]),
           makeBuffer(segmentSizes[ContentType.VIDEO]),
         ],
-        segmentStartTimes: [0, 10, 20, 30],
+        segmentStartTimes: [offset, offset+10, offset+20, offset+30],
         segmentDuration: 10,
+        timestampOffset: timestampOffset,
       };
     }
 
@@ -323,7 +361,17 @@ describe('StreamingEngine', () => {
           expect(position).toBeGreaterThan(-1);
           expect((periodIndex == 0 && position <= segmentsInFirstPeriod) ||
                  (periodIndex == 1 && position <= segmentsInSecondPeriod));
-          return segmentData[type].segments[position];
+          const segment = segmentData[type].segments[position];
+
+          const startTime = segmentData[type].segmentStartTimes[position];
+          const endTime = startTime + segmentData[type].segmentDuration;
+          if (endTime < segmentAvailability.start ||
+              startTime > segmentAvailability.end) {
+            // Return null if the segment is out of the segment availability
+            // window.
+            return null;
+          }
+          return segment;
         },
         /* delays= */ netEngineDelays);
   }
@@ -335,14 +383,24 @@ describe('StreamingEngine', () => {
       video: segmentData[ContentType.VIDEO].segmentDuration,
       text: segmentData[ContentType.TEXT].segmentDuration,
     };
+
+    const timestampOffsets = {
+      audio: segmentData[ContentType.AUDIO].timestampOffset,
+      video: segmentData[ContentType.VIDEO].timestampOffset,
+      text: segmentData[ContentType.TEXT].timestampOffset,
+    };
+
     if (segmentData['trickvideo']) {
       segmentDurations['trickvideo'] =
           segmentData['trickvideo'].segmentDuration;
+      timestampOffsets['trickvideo'] =
+          segmentData['trickvideo'].timestampOffset;
     }
     manifest = shaka.test.StreamingEngineUtil.createManifest(
         /** @type {!shaka.media.PresentationTimeline} */(timeline),
         [firstPeriodStartTime, secondPeriodStartTime],
-        presentationDuration, segmentDurations, initSegmentRanges);
+        presentationDuration, segmentDurations, initSegmentRanges,
+        timestampOffsets);
 
     audioStream = manifest.variants[0].audio;
     videoStream = manifest.variants[0].video;
@@ -362,6 +420,7 @@ describe('StreamingEngine', () => {
       bandwidth: 0,
       allowedByApplication: true,
       allowedByKeySystem: true,
+      decodingInfos: [],
     };
     manifest.variants.push(alternateVariant);
   }
@@ -593,6 +652,42 @@ describe('StreamingEngine', () => {
     }
   });
 
+  it('appends the ReadableStream data with low latency mode', async () => {
+    // Use the VOD manifests to test the streamDataCallback function in the low
+    // latency mode.
+    setupVod();
+
+    const config = shaka.util.PlayerConfiguration.createDefault().streaming;
+    config.lowLatencyMode = true;
+    mediaSourceEngine = new shaka.test.FakeMediaSourceEngine(segmentData);
+    mediaSourceEngine.appendBuffer.and.stub();
+    createStreamingEngine(config);
+
+    // Here we go!
+    streamingEngine.switchVariant(variant);
+    streamingEngine.switchTextStream(textStream);
+    await streamingEngine.start();
+    playing = true;
+
+    await runTest();
+
+    // In the mocks in StreamingEngineUtil, each segment gets fetched as two
+    // chunks of data, and each chunk contains one MDAT box.
+    // The streamDataCallback function will be triggered twice for each
+    // audio/video MP4 segment.
+    // appendBuffer should be called once for each init segment of the
+    // audio / video segment, and twice for each segment.
+    // 4 init segments + 8 audio/video segments * 2 + 4 text segments = 24.
+    if (window.ReadableStream) {
+      expect(mediaSourceEngine.appendBuffer).toHaveBeenCalledTimes(24);
+    } else {
+      // If ReadableStream is not supported by the browser, fall back to regular
+      // streaming.
+      // 4 init segments + 8 audio/video segments + 4 text segments = 16.
+      expect(mediaSourceEngine.appendBuffer).toHaveBeenCalledTimes(16);
+    }
+  });
+
   it('plays when a small gap is present at the beginning', async () => {
     const drift = 0.050;  // 50 ms
 
@@ -783,16 +878,48 @@ describe('StreamingEngine', () => {
     expect(mediaSourceEngine.appendBuffer).toHaveBeenCalled();
   });
 
+  // https://github.com/google/shaka-player/issues/2957
+  it('plays with fewer text segments', async () => {
+    setupVod();
+
+    // Only use one segment for text, which will buffer less than the others.
+    segmentData['text'].segments.splice(1, 3);
+    await textStream.createSegmentIndex();
+    const oldGet = /** @type {?} */ (textStream.segmentIndex.get);
+    textStream.segmentIndex.get = (idx) => {
+      return idx > 0 ? null : oldGet(idx);
+    };
+
+    mediaSourceEngine = new shaka.test.FakeMediaSourceEngine(segmentData);
+    createStreamingEngine();
+
+    // Here we go!
+    streamingEngine.switchVariant(variant);
+    streamingEngine.switchTextStream(textStream);
+    await streamingEngine.start();
+    playing = true;
+
+    await runTest();
+
+    expect(mediaSourceEngine.segments).toEqual({
+      audio: [true, true, true, true],
+      video: [true, true, true, true],
+      text: [true],
+    });
+  });
+
   describe('switchVariant/switchTextStream', () => {
     let initialVariant;
     let sameAudioVariant;
     let sameVideoVariant;
+    let differentVariant;
     let initialTextStream;
     let newTextStream;
 
     beforeEach(() => {
       // Set up a manifest with multiple variants and a text stream.
       manifest = shaka.test.ManifestGenerator.generate((manifest) => {
+        manifest.presentationTimeline.setDuration(60);
         manifest.addVariant(0, (variant) => {
           variant.addAudio(10, (stream) => {
             stream.useSegmentTemplate('audio-10-%d.mp4', 10);
@@ -813,10 +940,20 @@ describe('StreamingEngine', () => {
           });
           variant.addExistingStream(12);  // video
         });
+        manifest.addVariant(3, (variant) => {
+          variant.addVideo(14, (stream) => {
+            stream.useSegmentTemplate('video-14-%d.mp4', 10);
+          });
+          variant.addAudio(15, (stream) => {
+            stream.useSegmentTemplate('audio-15-%d.mp4', 10);
+          });
+        });
         manifest.addTextStream(20, (stream) => {
+          stream.setInitSegmentReference(['text-20-init'], 0, null);
           stream.useSegmentTemplate('text-20-%d.mp4', 10);
         });
         manifest.addTextStream(21, (stream) => {
+          stream.setInitSegmentReference(['text-21-init'], 0, null);
           stream.useSegmentTemplate('text-21-%d.mp4', 10);
         });
       });
@@ -824,17 +961,14 @@ describe('StreamingEngine', () => {
       initialVariant = manifest.variants[0];
       sameAudioVariant = manifest.variants[1];
       sameVideoVariant = manifest.variants[2];
+      differentVariant = manifest.variants[3];
       initialTextStream = manifest.textStreams[0];
       newTextStream = manifest.textStreams[1];
 
       // For these tests, we don't care about specific data appended.
       // Just return any old ArrayBuffer for any requested segment.
-      netEngine.request.and.callFake((requestType, request) => {
-        const buffer = new ArrayBuffer(0);
-        /** @type {shaka.extern.Response} */
-        const response = {uri: request.uris[0], data: buffer, headers: {}};
-        return shaka.util.AbortableOperation.completed(response);
-      });
+      netEngine = new shaka.test.FakeNetworkingEngine();
+      netEngine.setDefaultValue(new ArrayBuffer(0));
 
       // For these tests, we also don't need FakeMediaSourceEngine to verify
       // its input data.
@@ -904,6 +1038,66 @@ describe('StreamingEngine', () => {
       await Util.fakeEventLoop(1);
       expect(mediaSourceEngine.clear).toHaveBeenCalled();
       expect(mediaSourceEngine.resetCaptionParser).not.toHaveBeenCalled();
+    });
+
+    // See https://github.com/google/shaka-player/issues/2956
+    it('works with fast variant switches during update', async () => {
+      // Delay the appendBuffer call until later so we are waiting for this to
+      // finish when we switch.
+      const p = new shaka.util.PublicPromise();
+      const old = mediaSourceEngine.appendBuffer;
+      // Replace the whole spy since we want to call the original.
+      mediaSourceEngine.appendBuffer =
+          jasmine.createSpy('appendBuffer')
+              .and.callFake(async (type, data, start, end) => {
+                await p;
+                return Util.invokeSpy(old, type, data, start, end);
+              });
+
+      await streamingEngine.start();
+      playing = true;
+
+      await Util.fakeEventLoop(1);
+      streamingEngine.switchVariant(differentVariant, /* clearBuffer= */ true);
+      streamingEngine.switchVariant(initialVariant, /* clearBuffer= */ true);
+      p.resolve();
+
+      await Util.fakeEventLoop(5);
+
+      expect(Util.invokeSpy(mediaSourceEngine.bufferEnd, 'video')).toBe(10);
+    });
+
+    it('works with fast text stream switches during update', async () => {
+      // Delay the appendBuffer call until later so we are waiting for this to
+      // finish when we switch.
+      const p = new shaka.util.PublicPromise();
+
+      const old = mediaSourceEngine.appendBuffer;
+      // Replace the whole spy since we want to call the original.
+      mediaSourceEngine.appendBuffer =
+          jasmine.createSpy('appendBuffer')
+              .and.callFake(async (type, data, start, end) => {
+                await p;
+                return Util.invokeSpy(old, type, data, start, end);
+              });
+
+      await streamingEngine.start();
+      playing = true;
+
+      await Util.fakeEventLoop(3);
+      netEngine.request.calls.reset();
+
+      streamingEngine.switchTextStream(newTextStream);
+      streamingEngine.switchTextStream(initialTextStream);
+      p.resolve();
+
+      await Util.fakeEventLoop(5);
+
+      const segmentType = shaka.net.NetworkingEngine.RequestType.SEGMENT;
+      // Quickly switching back to text1, and text init segment should be
+      // fetched again.
+      netEngine.expectRequest('text-20-init', segmentType);
+      netEngine.expectNoRequest('text-21-init', segmentType);
     });
   });
 
@@ -1351,6 +1545,80 @@ describe('StreamingEngine', () => {
         audio: [true, true, true, true],
         video: [true, true, true, true],
         text: [true, true, true, true],
+      });
+    });
+
+    // https://github.com/google/shaka-player/issues/2670
+    it('rapid unbuffered seeks', async () => {
+      // This test simulates rapid dragging of the seek bar, as in #2670.
+      // In that issue, we would buffer the wrong segments due to a race
+      // condition.
+
+      // Part of the trigger of this issue is to have our seeks interrupt a
+      // pending segment request.  So we will delay segment requests to make
+      // that feasible in this test.
+      // eslint-disable-next-line no-restricted-syntax
+      const originalNetEngineRequest = netEngine.request.bind(netEngine);
+
+      // Set to true when we have seeked all the way back to 0.
+      let reachedStart = false;
+      let requestInProgress = false;
+
+      netEngine.request =
+          jasmine.createSpy('request').and.callFake((requestType, request) => {
+            if (reachedStart) {
+              // Let the first round of requests pass quickly.
+              return originalNetEngineRequest(requestType, request);
+            }
+
+            // Make this request take 3 simulated seconds.
+            const delay = Util.fakeEventLoop(3);
+            const op = shaka.util.AbortableOperation.notAbortable(delay);
+            requestInProgress = true;
+            return op.chain(() => {
+              requestInProgress = false;
+              return originalNetEngineRequest(requestType, request);
+            });
+          });
+
+      onTick.and.callFake(() => {
+        if (reachedStart) {
+          // Our rapid seeking stops once we hit the start of the content.
+          return;
+        }
+
+        if (!requestInProgress) {
+          // Wait for a request to be in progress.
+        } else {
+          // Pause when we seek.
+          playing = false;
+          presentationTimeInSeconds = 0;
+          streamingEngine.seeked();
+          reachedStart = true;
+        }
+      });
+
+      // Here we go!
+      streamingEngine.switchVariant(variant);
+      streamingEngine.switchTextStream(textStream);
+      await streamingEngine.start();
+      playing = true;
+
+      expect(presentationTimeInSeconds).toBe(0);
+      // Seek forward to the second-to-last segment.
+      presentationTimeInSeconds = 25;
+      streamingEngine.seeked();
+
+      await runTest(Util.spyFunc(onTick));
+
+      // Verify buffers.  When the bug is triggered, only segments 2 and 3 get
+      // buffered.  When things are working correctly, we should start buffering
+      // again from 0 after the seek.  Since bufferingGoal is only 5, segment 0
+      // is the only one that should be buffered now.
+      expect(mediaSourceEngine.segments).toEqual({
+        audio: [true, false, false, false],
+        video: [true, false, false, false],
+        text: [true, false, false, false],
       });
     });
   });
@@ -2370,6 +2638,27 @@ describe('StreamingEngine', () => {
       expect(event.detail).toEqual(emsgObj);
     });
 
+    it('raises an event for registered embedded v1 emsg boxes', async () => {
+      // same event but verison 1.
+      const v1EmsgSegment = Uint8ArrayUtils.fromHex(
+          '0000003f656d7367010000000000000100000000000000080000ffff00000001' +
+          '666f6f3a6261723a637573746f6d64617461736368656d6500310074657374');
+      segmentData[ContentType.VIDEO].segments[0] = v1EmsgSegment;
+      videoStream.emsgSchemeIdUris = [emsgObj.schemeIdUri];
+
+      // Here we go!
+      streamingEngine.switchVariant(variant);
+      streamingEngine.switchTextStream(textStream);
+      await streamingEngine.start();
+      playing = true;
+      await runTest();
+
+      expect(onEvent).toHaveBeenCalledTimes(1);
+
+      const event = onEvent.calls.argsFor(0)[0];
+      expect(event.detail).toEqual(emsgObj);
+    });
+
     it('raises multiple events', async () => {
       const dummyBox =
           shaka.util.Uint8ArrayUtils.fromHex('0000000c6672656501020304');
@@ -2450,6 +2739,68 @@ describe('StreamingEngine', () => {
     });
   });
 
+  describe('embedded emsg boxes with non zero timestamps', () => {
+    const emsgSegment = Uint8ArrayUtils.fromHex(
+        '0000003b656d736700000000666f6f3a6261723a637573746f6d646174617363' +
+        '68656d6500310000000001000000080000ffff0000000174657374');
+    const emsgObj = {
+      startTime: 8,
+      endTime: 0xffff + 8,
+      schemeIdUri: 'foo:bar:customdatascheme',
+      value: '1',
+      timescale: 1,
+      presentationTimeDelta: 8,
+      eventDuration: 0xffff,
+      id: 1,
+      messageData: new Uint8Array([0x74, 0x65, 0x73, 0x74]),
+    };
+
+    beforeEach(() => {
+      // setup an offset for the timestamps.
+      setupVod(false, 10);
+      mediaSourceEngine = new shaka.test.FakeMediaSourceEngine(segmentData);
+      createStreamingEngine();
+    });
+
+    it('event start matches presentation times for emsg boxes', async () => {
+      segmentData[ContentType.VIDEO].segments[0] = emsgSegment;
+      videoStream.emsgSchemeIdUris = [emsgObj.schemeIdUri];
+
+      // Here we go!
+      streamingEngine.switchVariant(variant);
+      streamingEngine.switchTextStream(textStream);
+      await streamingEngine.start();
+      playing = true;
+      await runTest();
+
+      expect(onEvent).toHaveBeenCalledTimes(1);
+
+      const event = onEvent.calls.argsFor(0)[0];
+      expect(event.detail).toEqual(emsgObj);
+    });
+
+    it('event start matches presentation time for v1 emsg boxes', async () => {
+      // same event but verison 1. start time is 18.
+      const v1EmsgSegment = Uint8ArrayUtils.fromHex(
+          '0000003f656d7367010000000000000100000000000000120000ffff00000001' +
+          '666f6f3a6261723a637573746f6d64617461736368656d6500310074657374');
+      segmentData[ContentType.VIDEO].segments[0] = v1EmsgSegment;
+      videoStream.emsgSchemeIdUris = [emsgObj.schemeIdUri];
+
+      // Here we go!
+      streamingEngine.switchVariant(variant);
+      streamingEngine.switchTextStream(textStream);
+      await streamingEngine.start();
+      playing = true;
+      await runTest();
+
+      expect(onEvent).toHaveBeenCalledTimes(1);
+
+      const event = onEvent.calls.argsFor(0)[0];
+      expect(event.detail).toEqual(emsgObj);
+    });
+  });
+
   describe('network downgrading', () => {
     /** @type {shaka.extern.Variant} */
     let initialVariant;
@@ -2496,6 +2847,7 @@ describe('StreamingEngine', () => {
 
       // For these tests, we don't care about specific data appended.
       // Just return any old ArrayBuffer for any requested segment.
+      netEngine = new shaka.test.FakeNetworkingEngine();
       netEngine.request.and.callFake((requestType, request) => {
         const buffer = new ArrayBuffer(0);
         const response = {uri: request.uris[0], data: buffer, headers: {}};
@@ -2589,7 +2941,7 @@ describe('StreamingEngine', () => {
         if (seg) {
           // With endByte being null, we won't know the segment size.
           return new shaka.media.SegmentReference(
-              seg.startTime, seg.endTime, seg.getUris,
+              seg.startTime, seg.endTime, seg.getUrisInner,
               /* startByte= */ 0, /* endByte= */ null,
               /* initSegmentReference= */ null, /* timestampOffset= */ 0,
               /* appendWindowStart= */ 0, /* appendWindowEnd= */ Infinity);
@@ -2696,7 +3048,7 @@ describe('StreamingEngine', () => {
           // With endByte being null, we won't know the segment size.
           // Segment size has to be calculated with times and bandwidth.
           return new shaka.media.SegmentReference(
-              seg.startTime, seg.endTime, seg.getUris,
+              seg.startTime, seg.endTime, seg.getUrisInner,
               /* startByte= */ 0, /* endByte= */ null,
               /* initSegmentReference= */ null, /* timestampOffset= */ 0,
               /* appendWindowStart= */ 0, /* appendWindowEnd= */ Infinity);
@@ -2794,6 +3146,7 @@ describe('StreamingEngine', () => {
 
     beforeEach(() => {
       manifest = shaka.test.ManifestGenerator.generate((manifest) => {
+        manifest.presentationTimeline.setDuration(60);
         manifest.addVariant(0, (variant) => {
           variant.addVideo(1, (stream) => {
             stream.useSegmentTemplate('video-110-%d.mp4', 10);
@@ -2803,7 +3156,7 @@ describe('StreamingEngine', () => {
           stream.useSegmentTemplate('video-120-%d.mp4', 10);
         });
         manifest.addTextStream(3, (stream) => {
-          stream.mimeType = shaka.util.MimeUtils.CLOSED_CAPTION_MIMETYPE;
+          stream.mimeType = shaka.util.MimeUtils.CEA608_CLOSED_CAPTION_MIMETYPE;
         });
       });
 

@@ -7,6 +7,9 @@
 
 goog.provide('shaka.ui.MuteButton');
 
+goog.require('shaka.ads.AdManager');
+goog.require('shaka.ui.Constants');
+goog.require('shaka.ui.Controls');
 goog.require('shaka.ui.Element');
 goog.require('shaka.ui.Enums');
 goog.require('shaka.ui.Locales');
@@ -31,9 +34,9 @@ shaka.ui.MuteButton = class extends shaka.ui.Element {
     this.button_ = shaka.util.Dom.createButton();
     this.button_.classList.add('shaka-mute-button');
     this.button_.classList.add('material-icons-round');
-    this.button_.textContent = shaka.ui.Enums.MaterialDesignIcons.MUTE;
     this.parent.appendChild(this.button_);
     this.updateAriaLabel_();
+    this.updateIcon_();
 
     this.eventManager.listen(
         this.localization, shaka.ui.Localization.LOCALE_UPDATED, () => {

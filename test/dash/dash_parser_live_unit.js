@@ -4,6 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+goog.require('goog.asserts');
+goog.require('shaka.dash.DashParser');
+goog.require('shaka.media.SegmentReference');
+goog.require('shaka.net.NetworkingEngine');
+goog.require('shaka.test.FakeNetworkingEngine');
+goog.require('shaka.test.ManifestParser');
+goog.require('shaka.test.Util');
+goog.require('shaka.util.AbortableOperation');
+goog.require('shaka.util.Error');
+goog.require('shaka.util.PlayerConfiguration');
+goog.require('shaka.util.StringUtils');
+goog.requireType('shaka.util.PublicPromise');
+
 describe('DashParser Live', () => {
   const Util = shaka.test.Util;
   const ManifestParser = shaka.test.ManifestParser;
@@ -27,9 +40,13 @@ describe('DashParser Live', () => {
     playerInterface = {
       networkingEngine: fakeNetEngine,
       filter: (manifest) => Promise.resolve(),
+      makeTextStreamsForClosedCaptions: (manifest) => {},
       onTimelineRegionAdded: fail,  // Should not have any EventStream elements.
       onEvent: fail,
       onError: fail,
+      isLowLatencyMode: () => false,
+      isAutoLowLatencyMode: () => false,
+      enableLowLatencyMode: () => {},
     };
   });
 
@@ -106,7 +123,7 @@ describe('DashParser Live', () => {
       return new shaka.media.SegmentReference(
           ref.startTime,
           ref.endTime,
-          ref.getUris,
+          ref.getUrisInner,
           ref.startByte,
           ref.endByte,
           ref.initSegmentReference,
@@ -657,6 +674,45 @@ describe('DashParser Live', () => {
     // @suggestedPresentationDelay it will be 3:50 minutes.
     expect(timeline.getSegmentAvailabilityEnd()).toBe(290);
     expect(timeline.getSeekRangeEnd()).toBe(230);
+  });
+
+  it('parses availabilityTimeOffset', async () => {
+    const manifestText = [
+      '<MPD type="dynamic" suggestedPresentationDelay="PT0S"',
+      '    minimumUpdatePeriod="PT5S"',
+      '    timeShiftBufferDepth="PT2M"',
+      '    maxSegmentDuration="PT10S"',
+      '    availabilityStartTime="1970-01-01T00:05:00Z">',
+      '  <Period id="1">',
+      '    <AdaptationSet mimeType="video/mp4">',
+      '      <Representation id="3" bandwidth="500">',
+      '         <BaseURL availabilityTimeOffset="6">http://example.com',
+      '         </BaseURL>',
+      '         <SegmentTemplate availabilityTimeOffset="6.00" ',
+      '          startNumber="1" media="s$Number$.mp4" duration="2" />',
+      '      </Representation>',
+      '    </AdaptationSet>',
+      '  </Period>',
+      '</MPD>',
+    ].join('\n');
+    fakeNetEngine.setResponseText('dummy://foo', manifestText);
+    playerInterface.isLowLatencyMode = () => true;
+
+    Date.now = () => 600000; /* 10 minutes */
+    const manifest = await parser.start('dummy://foo', playerInterface);
+
+    expect(manifest).toBeTruthy();
+    const timeline = manifest.presentationTimeline;
+    expect(timeline).toBeTruthy();
+
+    //  We are 5 minutes into the presentation, with a @timeShiftBufferDepth of
+    //  120 seconds and a @maxSegmentDuration of 10 seconds, the start will be
+    //  2:50. With the availabilityTimeOffset of 6+6 seconds, it will be 3:02.
+    expect(timeline.getSegmentAvailabilityStart()).toBe(182);
+    // Normally the end should be 4:50; with the availabilityTimeOffset of
+    // 12 seconds, it will be 5:02.
+    expect(timeline.getSegmentAvailabilityEnd()).toBe(302);
+    expect(timeline.getSeekRangeEnd()).toBe(302);
   });
 
   describe('availabilityWindowOverride', () => {
