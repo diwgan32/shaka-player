@@ -412,6 +412,11 @@ shaka.extern.IUISeekBar = class {
 
   /** @return {boolean} */
   isShowing() {}
+
+  initializeWarningZones() {}
+
+  updateWarningZones() {}
+
 };
 
 /**

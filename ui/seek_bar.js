@@ -212,6 +212,10 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     info.style.visibility = 'hidden';
   }
 
+  /**
+   * @override
+   * @export
+   */
   initializeWarningZones() {
     for (const zone of this.config_.markerConfig) {
       const time = zone.time;
@@ -255,6 +259,10 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     });
   }
 
+  /**
+   * @override
+   * @export
+   */
   updateWarningZones() {
     for (let i = 0; i < this.config_.markerConfig.length; i++) {
       const time = this.config_.markerConfig[i].time;
