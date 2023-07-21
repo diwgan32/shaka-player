@@ -360,6 +360,16 @@ shaka.ui.Controls = class extends shaka.util.FakeEventTarget {
   }
 
   /**
+   * @param {!shaka.extern.UIConfiguration} config
+   * @export
+   */
+  configureSeekBarOnly(config) {
+    this.config_ = config;
+    this.seekBar_.initializeWarningZones();
+    this.seekBar_.updateWarningZones();
+  }
+
+  /**
    * Enable or disable the custom controls. Enabling disables native
    * browser controls.
    *

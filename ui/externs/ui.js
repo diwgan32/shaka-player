@@ -42,6 +42,26 @@ shaka.extern.UISeekBarColors;
 
 /**
  * @typedef {{
+ *   time: number,
+ *   width: string,
+ *   text: string,
+ *   color: string
+ * }}
+ *
+ * @property {number} time
+ *   Time of marker
+ * @property {string} width
+ *   Width of marker
+ *   The risk rating at the high risk time.
+ * @property {number} text
+ *   Text to display in marker
+ * @property {number} color
+ *   Color of marker
+ */
+shaka.extern.UIMarkerConfig;
+
+/**
+ * @typedef {{
  *   base: string,
  *   level: string
  * }}
@@ -76,6 +96,7 @@ shaka.extern.UIVolumeBarColors;
  *   clearBufferOnQualityChange: boolean,
  *   showUnbufferedStart: boolean,
  *   seekBarColors: shaka.extern.UISeekBarColors,
+ *   markerConfig: !Array.<shaka.extern.UIMarkerConfig>,
  *   volumeBarColors: shaka.extern.UIVolumeBarColors,
  *   trackLabelFormat: shaka.ui.Overlay.TrackLabelFormat,
  *   fadeDelay: number,
@@ -139,6 +160,8 @@ shaka.extern.UIVolumeBarColors;
  *   The CSS colors applied to the seek bar.  This allows you to override the
  *   colors used in the linear gradient constructed in JavaScript, since you
  *   cannot easily do this in pure CSS.
+ * @property {shaka.extern.UIMarkerConfig} markerConfig
+ *   Configures the risk overlay that appears on the seek bar.
  * @property {shaka.extern.UIVolumeBarColors} volumeBarColors
  *   The CSS colors applied to the volume bar.  This allows you to override the
  *   colors used in the linear gradient constructed in JavaScript, since you
@@ -444,6 +467,12 @@ shaka.extern.IUISeekBar = class {
 
   /** @return {boolean} */
   isShowing() {}
+
+  /** initializeWarningZones **/
+  initializeWarningZones() {}
+
+  /** updateWarningZones **/
+  updateWarningZones() {}
 };
 
 /**
