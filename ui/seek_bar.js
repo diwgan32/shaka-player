@@ -68,6 +68,15 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
       this.video.currentTime = newCurrentTime;
     });
 
+    /** @private {!Array.<!HTMLElement>} */
+    this.warningZones_ = [];
+    /** @private {!Array.<!HTMLElement>} */
+    this.warningInfos_ = [];
+    /** @private {!Array.<number>} */
+    this.warningZonePos_ = [];
+    /** @private {!Array.<boolean>} */
+    this.isHovering_ = [];
+    this.initializeWarningZones();
 
     /**
      * The timer is activated for live content and checks if
@@ -195,6 +204,153 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
     }
   }
 
+  /**
+   * @private
+   */
+  createWarningZone_(color, width) {
+    const zone = shaka.util.Dom.createHTMLElement('div');
+    zone.style.width = width;
+    zone.style.height = '4px';
+    zone.style.backgroundColor = color;
+    zone.style.position = 'absolute';
+    this.container.insertBefore(zone,
+        this.container.childNodes[0]);
+    return zone;
+  }
+
+  /**
+   * @private
+   */
+  createWarningInfo_(time, text) {
+    const info = shaka.util.Dom.createHTMLElement('div');
+    info.style.width = shaka.ui.Constants.INFO_BAR_WIDTH+'px';
+    info.style.height = '20px';
+    info.style.backgroundColor = 'rgba(209, 209, 209, .9)';
+    info.style.borderRadius = '5px';
+    info.style.position = 'absolute';
+    info.style.visibility = 'hidden';
+    info.style.top = '-30px';
+    info.style.textAlign = 'center';
+
+    const textElement = shaka.util.Dom.createHTMLElement('b');
+    textElement.textContent = text;
+    info.insertBefore(textElement, info.childNodes[0]);
+    this.container.insertBefore(info,
+        this.container.childNodes[0]);
+    return info;
+  }
+
+  /**
+   * @private
+   */
+  initializeSingleWarningZone_(time, width, text, color) {
+    this.warningZones_.push(this.createWarningZone_(color, width));
+    this.warningInfos_.push(
+        this.createWarningInfo_(
+            time, text,
+        ),
+    );
+    this.isHovering_.push(false);
+    this.warningZonePos_.push(0);
+  }
+
+  /**
+   * @private
+   */
+  isHoveringOver_(event, pos, width) {
+    return event.offsetX > pos && event.offsetX < width + pos;
+  }
+
+  /**
+   * @private
+   */
+  onZoneHover_(zone, info, newWidth) {
+    zone.style.height = '8px';
+    zone.style.width = newWidth;
+    zone.style.top = '-2px';
+    info.style.visibility = 'visible';
+  }
+
+  /**
+   * @private
+   */
+  zoneReset_(zone, info, newWidth) {
+    zone.style.height = '4px';
+    zone.style.width = newWidth;
+    zone.style.top = '0px';
+    info.style.visibility = 'hidden';
+  }
+
+  /** @override */
+  initializeWarningZones() {
+    for (const zone of this.config_.markerConfig) {
+      const time = zone.time;
+      const color = zone.color;
+      const text = zone.text;
+      const width = zone.width;
+      this.initializeSingleWarningZone_(time, width,
+          text, color);
+    }
+
+    this.eventManager.listen(this.bar, 'mousemove', (e) => {
+      for (let i = 0; i < this.warningZones_.length; i++) {
+        const zone = this.warningZones_[i];
+        const zonePos = this.warningZonePos_[i];
+        const info = this.warningInfos_[i];
+        const width = parseInt(
+            this.config_.markerConfig[i].width.split('px')[0], 10,
+        );
+        if (this.isHoveringOver_(e, zonePos, width)) {
+          this.isHovering_[i] = true;
+          this.onZoneHover_(zone, info,
+              String(Math.round(width * 1.2)) + 'px');
+        } else {
+          this.isHovering_[i] = false;
+          this.zoneReset_(zone, info,
+              String(width) + 'px');
+        }
+      }
+    });
+
+    this.eventManager.listen(this.bar, 'mouseout', () => {
+      for (let i = 0; i < this.warningZones_.length; i++) {
+        const zone = this.warningZones_[i];
+        const info = this.warningInfos_[i];
+        const width = parseInt(
+            this.config_.markerConfig[i].width.split('px')[0], 10,
+        );
+        this.zoneReset_(zone, info, String(width) + 'px');
+        this.isHovering_[i] = false;
+      }
+    });
+  }
+
+  /** @override */
+  updateWarningZones() {
+    for (let i = 0; i < this.config_.markerConfig.length; i++) {
+      const time = this.config_.markerConfig[i].time;
+      const width = parseInt(
+          this.config_.markerConfig[i].width.split('px')[0], 10,
+      );
+      this.warningZonePos_[i] =
+          (time/this.video.duration) * this.bar.offsetWidth - width/2 || 0;
+      if (this.isHovering_[i]) {
+        this.warningZonePos_[i] -= 0.2 * width;
+      }
+      const labelPos = Math.max(
+          Math.min(
+              this.warningZonePos_[i] -
+                (shaka.ui.Constants.INFO_BAR_WIDTH/2 - width/2),
+              this.bar.offsetWidth - width,
+          ), 2,
+      );
+      this.warningInfos_[i].style.left =
+          String(labelPos)+'px';
+      this.warningZones_[i].style.left =
+          String(this.warningZonePos_[i])+'px';
+    }
+  }
+
   /** @override */
   release() {
     if (this.seekTimer_) {
@@ -307,6 +463,7 @@ shaka.ui.SeekBar = class extends shaka.ui.RangeElement {
 
     this.setRange(seekRange.start, seekRange.end);
 
+    this.updateWarningZones();
     if (!this.shouldBeDisplayed_()) {
       shaka.ui.Utils.setDisplay(this.container, false);
     } else {
