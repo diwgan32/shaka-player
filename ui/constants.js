@@ -9,3 +9,6 @@ goog.provide('shaka.ui.Constants');
 
 /** @const {number} */
 shaka.ui.Constants.MIN_SEEK_WINDOW_TO_SHOW_SEEKBAR = 5; // seconds
+
+/** @const {number} */
+shaka.ui.Constants.INFO_BAR_WIDTH = 80; // pixels
