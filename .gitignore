@@ -6,3 +6,7 @@ coverage/
 .DS_Store
 .vscode
 .babel-cache
+.pnp.*
+.yarn/unplugged
+.yarn/cache
+.yarn/install-state.gz
