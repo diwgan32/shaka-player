@@ -7,3 +7,7 @@ coverage/
 .vscode
 .babel-cache
 .idea/
+.pnp.*
+.yarn/unplugged
+.yarn/cache
+.yarn/install-state.gz
