@@ -11,3 +11,9 @@ coverage/
 .yarn/unplugged
 .yarn/cache
 .yarn/install-state.gz
+venv/
+dist/.csslintstamp
+dist/.htmllintstamp
+dist/.lintstamp
+dist/.testcheckstamp
+dist/demo.*
